@@ -1,0 +1,6 @@
+*.sql
+*.test.*
+eligibility.mjs
+README.md
+.git
+.env*

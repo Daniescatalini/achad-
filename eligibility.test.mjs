@@ -1,0 +1,11 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {eligibility} from './eligibility.mjs';
+const now=Date.now();
+const base={now,channelVerified:true,settings:{commission:8,minimumRating:4.5,niches:['Casa'],maxPrice:500,discount:15,cooldown:72,dailyLimit:6},review:{status:'approved',message:'Texto aprovado',offer_revision:'r1'},offer:{price:80,old_price:100,reference_verified:true,commission:10,rating:4.8,niche:'Casa',in_stock:true,checked_at:now,expires_at:now+600000,affiliate_url:'https://example.com/offer',affiliate_verified:true,revision:'r1'}};
+test('oferta validada passa',()=>assert.equal(eligibility(base).eligible,true));
+for(const [name,patch,reason] of [['preço vencido',{checked_at:now-120001},'stale_offer'],['cupom não comprovado',{coupon:'PROMO'},'coupon_unverified'],['link inválido',{affiliate_url:'javascript:alert(1)'},'invalid_url'],['produto sem estoque',{in_stock:false},'out_of_stock'],['alteração após aprovação',{revision:'r2'},'changed_since_review'],['desconto sem referência',{reference_verified:false},'discount_unverified'],['comissão ausente',{commission:NaN},'invalid_commission']])test(name,()=>assert.ok(eligibility({...base,offer:{...base.offer,...patch}}).reasons.includes(reason)));
+test('bloqueia repetição',()=>assert.ok(eligibility({...base,lastSentAt:now-1000}).reasons.includes('duplicate_cooldown')));
+test('limite diário',()=>assert.ok(eligibility({...base,sentToday:6}).reasons.includes('daily_limit')));
+test('canal não validado',()=>assert.equal(eligibility({...base,channelVerified:false}).eligible,false));
+test('aprovação obrigatória',()=>assert.equal(eligibility({...base,review:null}).eligible,false));
