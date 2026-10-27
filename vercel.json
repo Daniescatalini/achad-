@@ -8,5 +8,10 @@
       "source": "/api/mercadolivre/:action",
       "destination": "/api/mercadolivre?action=:action"
     }
-  ]
+  ],
+  "functions": {
+    "api/mercadolivre.js": {
+      "maxDuration": 60
+    }
+  }
 }

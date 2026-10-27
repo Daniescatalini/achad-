@@ -28,3 +28,6 @@ Entre com uma conta real no Achadô, abra Integrações e use Conectar Mercado L
 A consulta por ID usa anúncios originais. Não confirma comissões, avaliações ou geração de links de afiliada. Busca automática e WhatsApp continuam pendentes.
 
 Testes: `node --test *.test.*`.
+
+## Descoberta por categoria
+A tela Ofertas inclui navegação nas categorias oficiais e consulta sob demanda de até 20 entradas do ranking /highlights. Produtos de catálogo são resolvidos para o anúncio vencedor antes da consulta de preço. Aplica preço máximo e desconto informado pela API; não aplica comissão, cupom ou avaliações ausentes. Resultados são temporários e ainda não entram na fila de envio. Não há coleta agendada ativa. Respostas 403 são apresentadas como acesso não liberado, sem contornar a plataforma.
