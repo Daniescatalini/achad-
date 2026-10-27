@@ -34,7 +34,7 @@ module.exports=async function handler(req,res){res.setHeader('Cache-Control','no
   await db(user,'marketplace_connections',{method:'POST',headers:{Prefer:'resolution=merge-duplicates'},body:JSON.stringify({user_id:user.uid,provider:'mercadolivre',credentials:seal(t,'tokens:'+user.uid),expires_at:new Date(t.expires_at).toISOString(),refresh_lock:null,refresh_until:null})});
   return completion(res,true,'Sua conta do Mercado Livre foi conectada. Acesso a ofertas e comissões de afiliados ainda precisa ser confirmado.');
  }
- if(!['status','start','item'].includes(action))throw new SafeError('Recurso não encontrado.',404);
+ if(!['status','start','item','categories','discover'].includes(action))throw new SafeError('Recurso não encontrado.',404);
  const expected=action==='status'?'GET':'POST';if(req.method!==expected)throw new SafeError('Método inválido.',405);
  if(req.method==='POST'&&req.headers.origin!==ORIGIN)throw new SafeError('Origem inválida.',403);
  const user=await auth(req);
@@ -48,6 +48,32 @@ module.exports=async function handler(req,res){res.setHeader('Cache-Control','no
   const url=new URL('https://auth.mercadolivre.com.br/authorization');for(const [k,v] of Object.entries({response_type:'code',client_id:process.env.MELI_CLIENT_ID,redirect_uri:CALLBACK,state:nonce,code_challenge:crypto.createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'}))url.searchParams.set(k,v);
   return json(res,200,{url:url.toString()});
  }
+ if(action==='categories'||action==='discover'){
+  if(!row)throw new SafeError('Conecte sua conta primeiro.',409);
+  const input=typeof req.body==='string'?JSON.parse(req.body):req.body||{};
+  const category=String(input.category||'');
+  if(category&&!/^MLB\d{2,12}$/.test(category))throw new SafeError('Categoria inválida.');
+  const t=await freshToken(user,row);
+  const get=async path=>{const result=await request('https://api.mercadolibre.com'+path,{headers:{Authorization:'Bearer '+t.access_token}});if(!result.r.ok)throw new SafeError(result.r.status===403?'O Mercado Livre não liberou este recurso para seu aplicativo. A conexão da conta não garante acesso ao catálogo.':result.r.status===404?'Esta categoria não possui ranking disponível. Escolha uma subcategoria.':result.r.status===429?'Limite do Mercado Livre atingido. Aguarde antes de buscar novamente.':'O Mercado Livre não respondeu à consulta (código '+result.r.status+').',result.r.status===403?403:result.r.status===429?429:400);return result.data};
+  if(action==='categories'){const data=await get(category?'/categories/'+category:'/sites/MLB/categories');return json(res,200,category?{id:data.id,name:data.name,path:data.path_from_root,children:data.children_categories}:{children:data});}
+  if(!category)throw new SafeError('Selecione uma categoria.');
+  const maxPrice=Number(input.maxPrice),discount=Number(input.discount);
+  if(!Number.isFinite(maxPrice)||maxPrice<=0||maxPrice>1000000||!Number.isFinite(discount)||discount<0||discount>100)throw new SafeError('Confira preço máximo e desconto mínimo.');
+  const ranking=await get('/highlights/MLB/category/'+category);
+  const found=[],failures=[];const seen=new Set();const candidates=(ranking.content||[]).slice(0,20);
+  // Bounded batches avoid unbounded API fan-out.
+  for(let start=0;start<candidates.length;start+=4){await Promise.all(candidates.slice(start,start+4).map(async c=>{try{
+   let id=c.id;if(c.type==='PRODUCT'){const product=await get('/products/'+id);id=product.buy_box_winner?.item_id;if(!id)return;}
+   else if(c.type!=='ITEM'||!/^MLB\d+$/.test(id))return;
+   if(!/^MLB\d+$/.test(id)||seen.has(id))return;seen.add(id);
+   const item=await get('/items/'+id);const price=Number(item.price),old=Number(item.original_price);const pct=old>price&&price>0?(old-price)/old*100:null;
+   if(item.status!=='active'||item.currency_id!=='BRL'||!Number.isFinite(price)||price<=0||price>maxPrice||discount>0&&(pct===null||pct<discount))return;
+   const safe=(value,domain)=>{try{const u=new URL(value);return u.protocol==='https:'&&(u.hostname===domain||u.hostname.endsWith('.'+domain))?u.href:null}catch{return null}};
+   found.push({id,title:item.title,price,original_price:old>price?old:null,discount:pct,permalink:safe(item.permalink,'mercadolivre.com.br'),picture:safe(item.pictures?.[0]?.secure_url,'mlstatic.com'),position:c.position,checked_at:new Date().toISOString(),commission:null,affiliate_link:null,rating:null});
+  }catch(e){failures.push(e.message)}}));}
+  return json(res,200,{items:found.sort((a,b)=>a.position-b.position),examined:candidates.length,unavailable:failures.length,warnings:[...new Set(failures)],source:'Mais vendidos por categoria',coverage:'Até 20 entradas do ranking; não cobre todas as ofertas. Comissão, avaliações e cupons não confirmados.'});
+ }
+
  if(!row)throw new SafeError('Conecte sua conta primeiro.',409);
  const input=typeof req.body==='string'?JSON.parse(req.body):req.body;const id=String(input?.item_id||'').trim().toUpperCase().replace(/^MLB-/,'MLB');if(!/^MLB\d{6,16}$/.test(id))throw new SafeError('Informe o ID do anúncio, como MLB123456789.');
  const t=await freshToken(user,row);const {r,data}=await request('https://api.mercadolibre.com/items/'+id,{headers:{Authorization:'Bearer '+t.access_token}});
