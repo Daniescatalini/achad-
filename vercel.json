@@ -2,5 +2,11 @@
   "framework": null,
   "buildCommand": null,
   "outputDirectory": ".",
-  "cleanUrls": true
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/api/mercadolivre/:action",
+      "destination": "/api/mercadolivre?action=:action"
+    }
+  ]
 }
