@@ -54,7 +54,7 @@ module.exports=async function handler(req,res){res.setHeader('Cache-Control','no
   const category=String(input.category||'');
   if(category&&!/^MLB\d{2,12}$/.test(category))throw new SafeError('Categoria inválida.');
   const t=await freshToken(user,row);
-  const get=async path=>{const result=await request('https://api.mercadolibre.com'+path,{headers:{Authorization:'Bearer '+t.access_token}});if(!result.r.ok)throw new SafeError(result.r.status===403?'O Mercado Livre não liberou este recurso para seu aplicativo. A conexão da conta não garante acesso ao catálogo.':result.r.status===404?'Esta categoria não possui ranking disponível. Escolha uma subcategoria.':result.r.status===429?'Limite do Mercado Livre atingido. Aguarde antes de buscar novamente.':'O Mercado Livre não respondeu à consulta (código '+result.r.status+').',result.r.status===403?403:result.r.status===429?429:400);return result.data};
+  const get=async path=>{const result=await request('https://api.mercadolibre.com'+path,{headers:{Authorization:'Bearer '+t.access_token}});if(!result.r.ok)throw new SafeError(result.r.status===403?'O Mercado Livre não liberou este recurso para seu aplicativo. A conexão da conta não garante acesso ao catálogo.':result.r.status===404?'Recurso não encontrado no Mercado Livre: '+(path.startsWith('/highlights/')?'ranking da categoria':path.startsWith('/products/')?'produto de catálogo':path.startsWith('/user-products/')?'produto do vendedor':'anúncio ou listagem')+'.':result.r.status===429?'Limite do Mercado Livre atingido. Aguarde antes de buscar novamente.':'O Mercado Livre não respondeu à consulta (código '+result.r.status+').',result.r.status===403?403:result.r.status===429?429:400);return result.data};
   if(action==='categories'){const data=await get(category?'/categories/'+category:'/sites/MLB/categories');return json(res,200,category?{id:data.id,name:data.name,path:data.path_from_root,children:data.children_categories}:{children:data});}
   if(!category)throw new SafeError('Selecione uma categoria.');
   const maxPrice=Number(input.maxPrice),discount=Number(input.discount);
@@ -63,8 +63,14 @@ module.exports=async function handler(req,res){res.setHeader('Cache-Control','no
   const found=[],failures=[];const seen=new Set();const candidates=(ranking.content||[]).slice(0,20);
   // Bounded batches avoid unbounded API fan-out.
   for(let start=0;start<candidates.length;start+=4){await Promise.all(candidates.slice(start,start+4).map(async c=>{try{
-   let id=c.id;if(c.type==='PRODUCT'){const product=await get('/products/'+id);id=product.buy_box_winner?.item_id;if(!id)return;}
-   else if(c.type!=='ITEM'||!/^MLB\d+$/.test(id))return;
+   let id=c.id;if(c.type==='PRODUCT'){const product=await get('/products/'+id);id=product.buy_box_winner?.item_id;if(!id)throw new SafeError('Produto de catálogo sem anúncio vencedor disponível.');}
+   else if(c.type==='USER_PRODUCT'||/^MLBU\d+$/.test(id)){
+    if(!/^MLBU\d+$/.test(id))throw new SafeError('Identificador de produto do vendedor inválido.');
+    const up=await get('/user-products/'+id);
+    if(!/^\d+$/.test(String(up.user_id)))throw new SafeError('Produto sem vendedor consultável.');
+    const listing=await get('/users/'+up.user_id+'/items/search?user_product_id='+id+'&limit=1');
+    id=listing.results?.[0];if(!id)throw new SafeError('Produto do vendedor sem anúncio acessível.');
+   }else if(c.type!=='ITEM')throw new SafeError('Tipo de produto ainda não reconhecido pela integração.');
    if(!/^MLB\d+$/.test(id)||seen.has(id))return;seen.add(id);
    const item=await get('/items/'+id);const price=Number(item.price),old=Number(item.original_price);const pct=old>price&&price>0?(old-price)/old*100:null;
    if(item.status!=='active'||item.currency_id!=='BRL'||!Number.isFinite(price)||price<=0||price>maxPrice||discount>0&&(pct===null||pct<discount))return;
